@@ -68,7 +68,7 @@ func SDKToVMSS(sdkvmss armcompute.VirtualMachineScaleSet, sdkinstances []armcomp
 		sdkvmss.Properties.VirtualMachineProfile.StorageProfile != nil &&
 		sdkvmss.Properties.VirtualMachineProfile.StorageProfile.ImageReference != nil {
 		imageRef := sdkvmss.Properties.VirtualMachineProfile.StorageProfile.ImageReference
-		vmss.Image = SDKImageToImage(imageRef, sdkvmss.Plan != nil)
+		vmss.Image = SDKImageToImageWithPlan(imageRef, sdkvmss.Plan != nil, sdkvmss.Plan)
 	}
 
 	return vmss
@@ -95,7 +95,7 @@ func SDKVMToVMSSVM(sdkInstance armcompute.VirtualMachine, mode infrav1.Orchestra
 
 	if sdkInstance.Properties.StorageProfile != nil && sdkInstance.Properties.StorageProfile.ImageReference != nil {
 		imageRef := sdkInstance.Properties.StorageProfile.ImageReference
-		instance.Image = SDKImageToImage(imageRef, sdkInstance.Plan != nil)
+		instance.Image = SDKImageToImageWithPlan(imageRef, sdkInstance.Plan != nil, sdkInstance.Plan)
 	}
 
 	if len(sdkInstance.Zones) > 0 {
@@ -147,7 +147,7 @@ func SDKToVMSSVM(sdkInstance armcompute.VirtualMachineScaleSetVM) *azure.VMSSVM 
 
 	if sdkInstance.Properties.StorageProfile != nil && sdkInstance.Properties.StorageProfile.ImageReference != nil {
 		imageRef := sdkInstance.Properties.StorageProfile.ImageReference
-		instance.Image = SDKImageToImage(imageRef, sdkInstance.Plan != nil)
+		instance.Image = SDKImageToImageWithPlan(imageRef, sdkInstance.Plan != nil, sdkInstance.Plan)
 	}
 
 	if len(sdkInstance.Zones) > 0 {
@@ -160,19 +160,59 @@ func SDKToVMSSVM(sdkInstance armcompute.VirtualMachineScaleSetVM) *azure.VMSSVM 
 
 // SDKImageToImage converts a SDK image reference to infrav1.Image.
 func SDKImageToImage(sdkImageRef *armcompute.ImageReference, isThirdPartyImage bool) infrav1.Image {
+	return SDKImageToImageWithPlan(sdkImageRef, isThirdPartyImage, nil)
+}
+
+// SDKImageToImageWithPlan converts a SDK image reference to infrav1.Image and carries plan metadata where applicable.
+func SDKImageToImageWithPlan(sdkImageRef *armcompute.ImageReference, isThirdPartyImage bool, sdkPlan *armcompute.Plan) infrav1.Image {
 	if sdkImageRef.ID != nil {
-		return IDImageRefToImage(*sdkImageRef.ID)
+		return withPlan(IDImageRefToImage(*sdkImageRef.ID), sdkPlan)
 	}
 	// community gallery image
 	if sdkImageRef.CommunityGalleryImageID != nil {
-		return cgImageRefToImage(*sdkImageRef.CommunityGalleryImageID)
+		return withPlan(cgImageRefToImage(*sdkImageRef.CommunityGalleryImageID), sdkPlan)
 	}
 	// shared gallery image
 	if sdkImageRef.SharedGalleryImageID != nil {
-		return sgImageRefToImage(*sdkImageRef.SharedGalleryImageID)
+		return withPlan(sgImageRefToImage(*sdkImageRef.SharedGalleryImageID), sdkPlan)
 	}
 	// marketplace image
 	return mpImageRefToImage(sdkImageRef, isThirdPartyImage)
+}
+
+func withPlan(image infrav1.Image, sdkPlan *armcompute.Plan) infrav1.Image {
+	if sdkPlan == nil {
+		return image
+	}
+
+	publisher := ptr.Deref(sdkPlan.Publisher, "")
+	offer := ptr.Deref(sdkPlan.Product, "")
+	sku := ptr.Deref(sdkPlan.Name, "")
+
+	if image.ComputeGallery != nil {
+		if publisher != "" && offer != "" && sku != "" {
+			image.ComputeGallery.Plan = &infrav1.ImagePlan{
+				Publisher: publisher,
+				Offer:     offer,
+				SKU:       sku,
+			}
+		}
+		return image
+	}
+
+	if image.SharedGallery != nil {
+		if publisher != "" {
+			image.SharedGallery.Publisher = ptr.To(publisher)
+		}
+		if offer != "" {
+			image.SharedGallery.Offer = ptr.To(offer)
+		}
+		if sku != "" {
+			image.SharedGallery.SKU = ptr.To(sku)
+		}
+	}
+
+	return image
 }
 
 // GetOrchestrationMode returns the compute.OrchestrationMode for the given infrav1.OrchestrationModeType.

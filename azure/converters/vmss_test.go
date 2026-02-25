@@ -218,6 +218,7 @@ func Test_SDKImageToImage(t *testing.T) {
 		Name         string
 		SDKImageRef  *armcompute.ImageReference
 		IsThirdParty bool
+		SDKPlan      *armcompute.Plan
 		Image        infrav1.Image
 	}{
 		{
@@ -239,6 +240,11 @@ func Test_SDKImageToImage(t *testing.T) {
 				Version:   ptr.To("version"),
 			},
 			IsThirdParty: true,
+			SDKPlan: &armcompute.Plan{
+				Publisher: ptr.To("publisher"),
+				Product:   ptr.To("offer"),
+				Name:      ptr.To("sku"),
+			},
 			Image: infrav1.Image{
 				Marketplace: &infrav1.AzureMarketplaceImage{
 					ImagePlan: infrav1.ImagePlan{
@@ -295,6 +301,31 @@ func Test_SDKImageToImage(t *testing.T) {
 			},
 		},
 		{
+			Name: "compute gallery image with plan",
+			SDKImageRef: &armcompute.ImageReference{
+				ID: ptr.To("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/galleries/gallery/images/image/versions/version"),
+			},
+			SDKPlan: &armcompute.Plan{
+				Publisher: ptr.To("publisher"),
+				Product:   ptr.To("product"),
+				Name:      ptr.To("sku"),
+			},
+			Image: infrav1.Image{
+				ComputeGallery: &infrav1.AzureComputeGalleryImage{
+					Gallery:        "gallery",
+					Name:           "image",
+					Version:        "version",
+					SubscriptionID: ptr.To("subscription"),
+					ResourceGroup:  ptr.To("rg"),
+					Plan: &infrav1.ImagePlan{
+						Publisher: "publisher",
+						Offer:     "product",
+						SKU:       "sku",
+					},
+				},
+			},
+		},
+		{
 			Name: "compute gallery image not formatted as expected",
 			SDKImageRef: &armcompute.ImageReference{
 				ID: ptr.To("/compute/gallery/not/formatted/as/expected"),
@@ -316,6 +347,10 @@ func Test_SDKImageToImage(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			g := gomega.NewGomegaWithT(t)
+			if c.SDKPlan != nil {
+				g.Expect(converters.SDKImageToImageWithPlan(c.SDKImageRef, c.IsThirdParty, c.SDKPlan)).To(gomega.Equal(c.Image))
+				return
+			}
 			g.Expect(converters.SDKImageToImage(c.SDKImageRef, c.IsThirdParty)).To(gomega.Equal(c.Image))
 		})
 	}
